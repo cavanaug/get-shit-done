@@ -67,7 +67,7 @@ The existing function already writes the correct directory structure. It takes a
 Mirrors `getCodexSkillAdapterHeader()`. Three sections:
 
 **A. Skill Invocation**
-- Invoked by mentioning `/<skillName>` in the prompt (e.g. `/gsd-plan-phase`)
+- Invoked by mentioning `$<skillName>` in the prompt
 - Text after the skill name is treated as `{{GSD_ARGS}}`
 
 **B. AskUserQuestion mapping**
@@ -86,7 +86,7 @@ Mirrors `getCodexSkillAdapterHeader()`. Three sections:
 ### New: `convertClaudeCommandToCopilotSkill(content, skillName)`
 
 Same signature as `convertClaudeCommandToCodexSkill()`:
-1. Apply `convertClaudeToCopilotMarkdown()` (path replacement + `$ARGUMENTS` → `{{GSD_ARGS}}`, `/gsd:cmd` → `/gsd-cmd`)
+1. Apply `convertClaudeToCodexMarkdown()` (path replacement + `$ARGUMENTS` → `{{GSD_ARGS}}`) — this is runtime-agnostic
 2. Extract frontmatter description
 3. Prepend `getCopilotSkillAdapterHeader(skillName)`
 4. Return full SKILL.md content
@@ -250,7 +250,7 @@ Add `isCopilot` flag. Branch the skills, agents, and hooks sections:
 ```js
 if (runtime === 'copilot') program = 'Copilot';
 // ...
-if (runtime === 'copilot') command = '/gsd-new-project';
+if (runtime === 'copilot') command = '$gsd-new-project';
 // No statusline for copilot — skip handleStatusline
 ```
 

@@ -452,15 +452,16 @@ function extractFrontmatterField(frontmatter, fieldName) {
   return match[1].trim().replace(/^['"]|['"]$/g, '');
 }
 
-// Converts /gsd:cmd → {prefix}gsd-cmd (prefix='$' for Codex, '/' for Copilot/Claude Code)
-function convertSlashCommandsToSkillMentions(content, prefix = '/') {
-  return content.replace(/\/gsd:([a-z0-9-]+)/gi, (_, commandName) => {
-    return `${prefix}gsd-${String(commandName).toLowerCase()}`;
+function convertSlashCommandsToCodexSkillMentions(content) {
+  let converted = content.replace(/\/gsd:([a-z0-9-]+)/gi, (_, commandName) => {
+    return `$gsd-${String(commandName).toLowerCase()}`;
   });
+  converted = converted.replace(/\/gsd-help\b/g, '$gsd-help');
+  return converted;
 }
 
-function convertClaudeToSkillMarkdown(content, prefix = '/') {
-  let converted = convertSlashCommandsToSkillMentions(content, prefix);
+function convertClaudeToCodexMarkdown(content) {
+  let converted = convertSlashCommandsToCodexSkillMentions(content);
   converted = converted.replace(/\$ARGUMENTS\b/g, '{{GSD_ARGS}}');
   return converted;
 }
@@ -509,7 +510,7 @@ Result parsing:
 }
 
 function convertClaudeCommandToCodexSkill(content, skillName) {
-  const converted = convertClaudeToSkillMarkdown(content, '$');
+  const converted = convertClaudeToCodexMarkdown(content);
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   let description = `Run GSD workflow ${skillName}.`;
   if (frontmatter) {
@@ -531,7 +532,7 @@ function convertClaudeCommandToCodexSkill(content, skillName) {
  * and cleans up frontmatter (removes tools/color fields).
  */
 function convertClaudeAgentToCodexAgent(content) {
-  let converted = convertClaudeToSkillMarkdown(content, '$');
+  let converted = convertClaudeToCodexMarkdown(content);
 
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   if (!frontmatter) return converted;
@@ -556,7 +557,7 @@ purpose: ${toSingleLine(description)}
  * Explains Copilot-specific invocation, interactive list interaction, and fleet mapping.
  */
 function getCopilotSkillAdapterHeader(skillName) {
-  const invocation = `/${skillName}`;
+  const invocation = `$${skillName}`;
   return `<copilot_skill_adapter>
 ## A. Skill Invocation
 - This skill is invoked by mentioning \`${invocation}\`.
@@ -583,7 +584,7 @@ GSD workflows use \`Task(...)\` (Claude Code syntax). Translate to Copilot fleet
  * Applies base markdown conversions, prepends Copilot adapter header.
  */
 function convertClaudeCommandToCopilotSkill(content, skillName) {
-  const converted = convertClaudeToSkillMarkdown(content, '/');
+  const converted = convertClaudeToCodexMarkdown(content);
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   let description = `Run GSD workflow ${skillName}.`;
   if (frontmatter) {
@@ -601,7 +602,7 @@ function convertClaudeCommandToCopilotSkill(content, skillName) {
  * Produces JSON-array tools, user-invocable: false, <copilot_agent_role> block.
  */
 function convertClaudeAgentToCopilotAgent(content) {
-  let converted = convertClaudeToSkillMarkdown(content, '/');
+  let converted = convertClaudeToCodexMarkdown(content);
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   if (!frontmatter) return converted;
   const name = extractFrontmatterField(frontmatter, 'name') || 'unknown';
@@ -1283,7 +1284,7 @@ function copyWithPathReplacement(srcDir, destDir, pathPrefix, runtime, isCommand
           fs.writeFileSync(destPath, content);
         }
       } else if (isCodex) {
-        content = convertClaudeToSkillMarkdown(content, '$');
+        content = convertClaudeToCodexMarkdown(content);
         fs.writeFileSync(destPath, content);
       } else {
         fs.writeFileSync(destPath, content);
@@ -2392,7 +2393,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   let command = '/gsd:new-project';
   if (runtime === 'opencode') command = '/gsd-new-project';
   if (runtime === 'codex') command = '$gsd-new-project';
-  if (runtime === 'copilot') command = '/gsd-new-project';
+  if (runtime === 'copilot') command = '$gsd-new-project';
   console.log(`
   ${green}Done!${reset} Open a blank directory in ${program} and run ${cyan}${command}${reset}.
 
