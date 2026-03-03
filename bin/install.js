@@ -605,9 +605,8 @@ function convertClaudeCommandToCopilotSkill(content, skillName) {
     if (maybeDescription) description = maybeDescription;
   }
   description = toSingleLine(description);
-  const shortDescription = description.length > 180 ? `${description.slice(0, 177)}...` : description;
   const adapter = getCopilotSkillAdapterHeader(skillName);
-  return `---\nname: ${yamlQuote(skillName)}\ndescription: ${yamlQuote(description)}\nmetadata:\n  short-description: ${yamlQuote(shortDescription)}\n---\n\n${adapter}\n\n${body.trimStart()}`;
+  return `---\nname: ${yamlQuote(skillName)}\ndescription: ${yamlQuote(description)}\n---\n\n${adapter}\n\n${body.trimStart()}`;
 }
 
 /**
