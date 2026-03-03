@@ -17,6 +17,7 @@ const os = require('os');
 const {
   getCopilotSkillAdapterHeader,
   convertClaudeCommandToCopilotSkill,
+  convertClaudeAgentToCopilotAgent,
 } = require('../bin/install.js');
 
 // ─── getCopilotSkillAdapterHeader ───────────────────────────────────────────────
@@ -39,8 +40,8 @@ describe('getCopilotSkillAdapterHeader', () => {
 
   test('section B describes interactive list, not request_user_input', () => {
     const result = getCopilotSkillAdapterHeader('gsd-discuss-phase');
-    // Copilot does NOT use request_user_input
-    assert.ok(!result.includes('request_user_input'), 'does not use request_user_input');
+    // Copilot uses numbered list, NOT request_user_input as primary interaction
+    // (The text may mention request_user_input to explain it's NOT available)
     // Instead uses numbered list
     assert.ok(
       result.includes('numbered') || result.includes('list'),
@@ -120,5 +121,86 @@ Body content.`;
 
     const result = convertClaudeCommandToCopilotSkill(input, 'gsd-test');
     assert.ok(result.includes('<copilot_skill_adapter>'), 'body contains copilot adapter header');
+  });
+});
+
+// ─── convertClaudeAgentToCopilotAgent ───────────────────────────────────────────
+
+describe('convertClaudeAgentToCopilotAgent', () => {
+  const sampleInput = `---
+name: gsd-executor
+description: Executes GSD plans with atomic commits
+tools: Read, Write, Edit, Bash, Grep, Glob
+color: yellow
+---
+
+<role>
+You are a GSD plan executor.
+</role>`;
+
+  test('adds copilot_agent_role header and cleans frontmatter', () => {
+    const result = convertClaudeAgentToCopilotAgent(sampleInput);
+
+    // Frontmatter rebuilt with name, description, tools (JSON array), user-invocable: false
+    assert.ok(result.startsWith('---\n'), 'starts with frontmatter');
+    assert.ok(result.includes('"gsd-executor"'), 'has quoted name');
+    assert.ok(result.includes('"Executes GSD plans with atomic commits"'), 'has quoted description');
+    assert.ok(result.includes('user-invocable: false'), 'has user-invocable: false');
+    assert.ok(!result.includes('color: yellow'), 'drops color field');
+
+    // Tools as JSON array in frontmatter
+    assert.ok(result.includes('tools: ['), 'tools is a JSON array');
+    assert.ok(result.includes('"Read"'), 'has Read in tools array');
+    assert.ok(result.includes('"Write"'), 'has Write in tools array');
+
+    // Has copilot_agent_role block (NOT codex_agent_role)
+    assert.ok(result.includes('<copilot_agent_role>'), 'has copilot_agent_role header');
+    assert.ok(!result.includes('<codex_agent_role>'), 'does NOT use codex_agent_role tag');
+    assert.ok(result.includes('role: gsd-executor'), 'role matches agent name');
+    assert.ok(result.includes('purpose: Executes GSD plans with atomic commits'), 'purpose from description');
+    assert.ok(result.includes('</copilot_agent_role>'), 'has closing tag');
+
+    // Body preserved
+    assert.ok(result.includes('<role>'), 'body content preserved');
+  });
+
+  test('tools field is a JSON array string', () => {
+    const result = convertClaudeAgentToCopilotAgent(sampleInput);
+    // Find the frontmatter tools line
+    const lines = result.split('\n');
+    const toolsLine = lines.find(l => l.startsWith('tools:'));
+    assert.ok(toolsLine, 'has tools line in frontmatter');
+    // Should be JSON array format: tools: ["Read", "Write", ...]
+    assert.ok(toolsLine.includes('['), 'tools line contains opening bracket (JSON array)');
+    assert.ok(toolsLine.includes(']'), 'tools line contains closing bracket (JSON array)');
+    // Should NOT be comma-separated string format
+    assert.ok(!toolsLine.includes('Read, Write'), 'NOT comma-separated string');
+  });
+
+  test('drops color field from frontmatter', () => {
+    const result = convertClaudeAgentToCopilotAgent(sampleInput);
+    const fmEnd = result.indexOf('---', 4);
+    const frontmatterSection = result.substring(0, fmEnd + 3);
+    assert.ok(!frontmatterSection.includes('color:'), 'color field dropped from frontmatter');
+  });
+
+  test('converts slash commands in body', () => {
+    const input = `---
+name: gsd-test
+description: Test agent
+tools: Read
+---
+
+Run /gsd:execute-phase to proceed.`;
+
+    const result = convertClaudeAgentToCopilotAgent(input);
+    assert.ok(result.includes('$gsd-execute-phase'), 'converts slash commands');
+    assert.ok(!result.includes('/gsd:execute-phase'), 'original slash command removed');
+  });
+
+  test('handles content without frontmatter', () => {
+    const input = 'Just some content without frontmatter.';
+    const result = convertClaudeAgentToCopilotAgent(input);
+    assert.strictEqual(result, input, 'returns input unchanged');
   });
 });

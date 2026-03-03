@@ -538,6 +538,70 @@ purpose: ${toSingleLine(description)}
 }
 
 /**
+ * Get the Copilot-specific skill adapter header for a given skill name.
+ * Explains Copilot-specific invocation, interactive list interaction, and fleet mapping.
+ */
+function getCopilotSkillAdapterHeader(skillName) {
+  const invocation = `$${skillName}`;
+  return `<copilot_skill_adapter>
+## A. Skill Invocation
+- This skill is invoked by mentioning \`${invocation}\`.
+- Treat all user text after \`${invocation}\` as \`{{GSD_ARGS}}\`.
+- If no arguments are present, treat \`{{GSD_ARGS}}\` as empty.
+
+## B. AskUserQuestion → Interactive List
+GSD workflows use \`AskUserQuestion\`. Copilot has no \`request_user_input\` tool. Instead:
+- Present options as an interactive numbered list; the user types their selection.
+- In non-interactive/autopilot mode: pick the most reasonable default and proceed without asking.
+- Multi-select: ask the user to enter comma-separated numbers (e.g. "1, 3").
+
+## C. Task() → /fleet Mapping
+GSD workflows use \`Task(...)\` (Claude Code syntax). Translate to Copilot fleet:
+- \`Task(subagent_type="X", prompt="Y")\` → prefix the prompt with \`/fleet\` to spawn parallel subagents
+- Serial subagent work: use \`@agent-name\` mention to delegate to a single subagent inline
+- Parallel fan-out: use \`/fleet\` — orchestrator manages lifecycle automatically
+- No \`close_agent()\` needed — fleet manages cleanup
+</copilot_skill_adapter>`;
+}
+
+/**
+ * Convert Claude Code slash-command markdown to Copilot SKILL.md format.
+ * Applies base markdown conversions, prepends Copilot adapter header.
+ */
+function convertClaudeCommandToCopilotSkill(content, skillName) {
+  const converted = convertClaudeToCodexMarkdown(content);
+  const { frontmatter, body } = extractFrontmatterAndBody(converted);
+  let description = `Run GSD workflow ${skillName}.`;
+  if (frontmatter) {
+    const maybeDescription = extractFrontmatterField(frontmatter, 'description');
+    if (maybeDescription) description = maybeDescription;
+  }
+  description = toSingleLine(description);
+  const shortDescription = description.length > 180 ? `${description.slice(0, 177)}...` : description;
+  const adapter = getCopilotSkillAdapterHeader(skillName);
+  return `---\nname: ${yamlQuote(skillName)}\ndescription: ${yamlQuote(description)}\nmetadata:\n  short-description: ${yamlQuote(shortDescription)}\n---\n\n${adapter}\n\n${body.trimStart()}`;
+}
+
+/**
+ * Convert Claude Code agent markdown to Copilot .agent.md format.
+ * Produces JSON-array tools, user-invocable: false, <copilot_agent_role> block.
+ */
+function convertClaudeAgentToCopilotAgent(content) {
+  let converted = convertClaudeToCodexMarkdown(content);
+  const { frontmatter, body } = extractFrontmatterAndBody(converted);
+  if (!frontmatter) return converted;
+  const name = extractFrontmatterField(frontmatter, 'name') || 'unknown';
+  const description = extractFrontmatterField(frontmatter, 'description') || '';
+  const toolsRaw = extractFrontmatterField(frontmatter, 'tools') || '';
+  // Convert comma-separated tools to JSON array
+  const toolsArray = toolsRaw.split(',').map(t => t.trim()).filter(Boolean);
+  const toolsJson = JSON.stringify(toolsArray);
+  const roleHeader = `<copilot_agent_role>\nrole: ${name}\npurpose: ${toSingleLine(description)}\n</copilot_agent_role>`;
+  const cleanFrontmatter = `---\nname: ${yamlQuote(name)}\ndescription: ${yamlQuote(toSingleLine(description))}\ntools: ${toolsJson}\nuser-invocable: false\n---`;
+  return `${cleanFrontmatter}\n\n${roleHeader}\n${body}`;
+}
+
+/**
  * Generate a per-agent .toml config file for Codex.
  * Sets sandbox_mode and developer_instructions from the agent markdown body.
  */
@@ -2333,6 +2397,9 @@ if (process.env.GSD_TEST_MODE) {
     convertClaudeCommandToCodexSkill,
     GSD_CODEX_MARKER,
     CODEX_AGENT_SANDBOX,
+    getCopilotSkillAdapterHeader,
+    convertClaudeCommandToCopilotSkill,
+    convertClaudeAgentToCopilotAgent,
   };
 } else {
 
