@@ -201,6 +201,29 @@ Run /gsd:execute-phase to proceed.`;
     assert.ok(!result.includes('/gsd:execute-phase'), 'original slash command removed');
   });
 
+  test('converts $ARGUMENTS in body', () => {
+    const input = `---
+name: gsd-test
+description: Test agent
+tools: Read
+---
+
+Run with $ARGUMENTS provided.`;
+
+    const result = convertClaudeAgentToCopilotAgent(input);
+    assert.ok(result.includes('{{GSD_ARGS}}'), 'converts $ARGUMENTS to {{GSD_ARGS}}');
+    assert.ok(!result.includes('$ARGUMENTS'), 'original $ARGUMENTS removed');
+  });
+
+  test('tools NOT duplicated inside copilot_agent_role block', () => {
+    const result = convertClaudeAgentToCopilotAgent(sampleInput);
+    // tools appear in frontmatter as JSON array — NOT inside the role block
+    const roleStart = result.indexOf('<copilot_agent_role>');
+    const roleEnd = result.indexOf('</copilot_agent_role>');
+    const roleBlock = result.substring(roleStart, roleEnd);
+    assert.ok(!roleBlock.includes('tools:'), 'tools field NOT inside copilot_agent_role block');
+  });
+
   test('handles content without frontmatter', () => {
     const input = 'Just some content without frontmatter.';
     const result = convertClaudeAgentToCopilotAgent(input);
@@ -393,6 +416,8 @@ describe('install copilot (integration)', () => {
     assert.ok(fs.existsSync(skillFile), `SKILL.md exists in ${skillDirs[0].name}/`);
     const content = fs.readFileSync(skillFile, 'utf8');
     assert.ok(content.includes('<copilot_skill_adapter>'), 'SKILL.md contains copilot_skill_adapter header');
+    assert.ok(!content.includes('metadata:'), 'SKILL.md does NOT contain metadata field');
+    assert.ok(!content.includes('short-description:'), 'SKILL.md does NOT contain short-description field');
   });
 
   (hasAgents ? test : test.skip)('writes agents as agents/gsd-*.agent.md with copilot_agent_role', () => {
