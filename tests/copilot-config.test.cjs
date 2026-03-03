@@ -125,6 +125,22 @@ Body content.`;
     const result = convertClaudeCommandToCopilotSkill(input, 'gsd-test');
     assert.ok(result.includes('<copilot_skill_adapter>'), 'body contains copilot adapter header');
   });
+
+  test('strips metadata and short-description fields from frontmatter', () => {
+    // Copilot throws on unrecognised frontmatter fields — these must be dropped
+    const input = `---
+description: Test skill
+metadata:
+  short-description: A short desc
+---
+
+Body content.`;
+
+    const result = convertClaudeCommandToCopilotSkill(input, 'gsd-test');
+    assert.ok(!result.includes('metadata:'), 'metadata field stripped');
+    assert.ok(!result.includes('short-description:'), 'short-description field stripped');
+    assert.ok(result.includes('description: "Test skill"'), 'description preserved');
+  });
 });
 
 // ─── convertClaudeAgentToCopilotAgent ───────────────────────────────────────────
