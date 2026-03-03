@@ -761,6 +761,97 @@ function installCodexConfig(targetDir, agentsSrc) {
 }
 
 /**
+ * Install GSD hooks for Copilot CLI via hooks.json.
+ * Copilot uses hooks.json (not settings.json) with camelCase event names.
+ * Hook scripts are copied from hooks/dist/ with '.copilot' path templating.
+ * @param {string} targetDir - The Copilot config directory (e.g. ~/.copilot)
+ * @param {boolean} isGlobal - Whether this is a global install
+ */
+function installCopilotHooks(targetDir, isGlobal) {
+  const src = path.join(__dirname, '..');
+  // Copy hook scripts (template '.copilot' path)
+  const hooksSrc = path.join(src, 'hooks', 'dist');
+  if (fs.existsSync(hooksSrc)) {
+    const hooksDest = path.join(targetDir, 'hooks');
+    fs.mkdirSync(hooksDest, { recursive: true });
+    const configDirReplacement = getConfigDirFromHome('copilot', isGlobal);
+    for (const entry of fs.readdirSync(hooksSrc)) {
+      const srcFile = path.join(hooksSrc, entry);
+      if (fs.statSync(srcFile).isFile()) {
+        const destFile = path.join(hooksDest, entry);
+        if (entry.endsWith('.js')) {
+          let content = fs.readFileSync(srcFile, 'utf8');
+          content = content.replace(/'\.claude'/g, configDirReplacement);
+          fs.writeFileSync(destFile, content);
+        } else {
+          fs.copyFileSync(srcFile, destFile);
+        }
+      }
+    }
+  }
+
+  // Build hook command strings
+  const hooksDir = path.join(targetDir, 'hooks');
+  const updateCheckCommand = isGlobal
+    ? `node "${path.join(hooksDir, 'gsd-check-update.js').replace(/\\/g, '/')}"`
+    : `node ".copilot/hooks/gsd-check-update.js"`;
+  const contextMonitorCommand = isGlobal
+    ? `node "${path.join(hooksDir, 'gsd-context-monitor.js').replace(/\\/g, '/')}"`
+    : `node ".copilot/hooks/gsd-context-monitor.js"`;
+
+  // Read existing hooks.json or start fresh
+  const hooksPath = path.join(targetDir, 'hooks.json');
+  let hooksData = { version: 1, hooks: {} };
+  if (fs.existsSync(hooksPath)) {
+    try {
+      hooksData = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    } catch (_) { /* use default */ }
+  }
+  if (!hooksData.hooks) hooksData.hooks = {};
+
+  // sessionStart — idempotent merge
+  if (!hooksData.hooks.sessionStart) hooksData.hooks.sessionStart = [];
+  const hasUpdateHook = hooksData.hooks.sessionStart.some(e => e.bash && e.bash.includes('gsd-check-update'));
+  if (!hasUpdateHook) {
+    hooksData.hooks.sessionStart.push({ type: 'command', bash: updateCheckCommand, timeoutSec: 30 });
+  }
+
+  // postToolUse — idempotent merge
+  if (!hooksData.hooks.postToolUse) hooksData.hooks.postToolUse = [];
+  const hasMonitorHook = hooksData.hooks.postToolUse.some(e => e.bash && e.bash.includes('gsd-context-monitor'));
+  if (!hasMonitorHook) {
+    hooksData.hooks.postToolUse.push({ type: 'command', bash: contextMonitorCommand, timeoutSec: 30 });
+  }
+
+  fs.writeFileSync(hooksPath, JSON.stringify(hooksData, null, 2) + '\n');
+}
+
+/**
+ * Strip GSD entries from a parsed hooks.json object.
+ * Returns cleaned object, or null if hooks.json would be empty.
+ * @param {object} hooksData - Parsed hooks.json object
+ * @returns {object|null} Cleaned object, or null if no hooks remain
+ */
+function stripGsdFromCopilotHooks(hooksData) {
+  if (!hooksData || !hooksData.hooks) return null;
+  const cleaned = { ...hooksData, hooks: { ...hooksData.hooks } };
+
+  for (const eventName of Object.keys(cleaned.hooks)) {
+    if (Array.isArray(cleaned.hooks[eventName])) {
+      cleaned.hooks[eventName] = cleaned.hooks[eventName].filter(e =>
+        !(e.bash && (e.bash.includes('gsd-check-update') || e.bash.includes('gsd-context-monitor')))
+      );
+      if (cleaned.hooks[eventName].length === 0) {
+        delete cleaned.hooks[eventName];
+      }
+    }
+  }
+
+  if (Object.keys(cleaned.hooks).length === 0) return null;
+  return cleaned;
+}
+
+/**
  * Strip HTML <sub> tags for Gemini CLI output
  * Terminals don't support subscript — Gemini renders these as raw HTML.
  * Converts <sub>text</sub> to italic *(text)* for readable terminal output.
@@ -2385,7 +2476,7 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
 }
 
 // Test-only exports — skip main logic when loaded as a module for testing
-if (process.env.GSD_TEST_MODE) {
+ if (process.env.GSD_TEST_MODE) {
   module.exports = {
     getCodexSkillAdapterHeader,
     convertClaudeAgentToCodexAgent,
@@ -2400,6 +2491,8 @@ if (process.env.GSD_TEST_MODE) {
     getCopilotSkillAdapterHeader,
     convertClaudeCommandToCopilotSkill,
     convertClaudeAgentToCopilotAgent,
+    installCopilotHooks,
+    stripGsdFromCopilotHooks,
   };
 } else {
 
