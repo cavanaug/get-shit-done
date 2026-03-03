@@ -466,6 +466,19 @@ function convertClaudeToCodexMarkdown(content) {
   return converted;
 }
 
+// Copilot uses /skillname (same as Claude Code / OpenCode), not $skillname (Codex-specific)
+function convertSlashCommandsToCopilotSkillMentions(content) {
+  return content.replace(/\/gsd:([a-z0-9-]+)/gi, (_, commandName) => {
+    return `/gsd-${String(commandName).toLowerCase()}`;
+  });
+}
+
+function convertClaudeToCopilotMarkdown(content) {
+  let converted = convertSlashCommandsToCopilotSkillMentions(content);
+  converted = converted.replace(/\$ARGUMENTS\b/g, '{{GSD_ARGS}}');
+  return converted;
+}
+
 function getCodexSkillAdapterHeader(skillName) {
   const invocation = `$${skillName}`;
   return `<codex_skill_adapter>
@@ -557,7 +570,7 @@ purpose: ${toSingleLine(description)}
  * Explains Copilot-specific invocation, interactive list interaction, and fleet mapping.
  */
 function getCopilotSkillAdapterHeader(skillName) {
-  const invocation = `$${skillName}`;
+  const invocation = `/${skillName}`;
   return `<copilot_skill_adapter>
 ## A. Skill Invocation
 - This skill is invoked by mentioning \`${invocation}\`.
@@ -584,7 +597,7 @@ GSD workflows use \`Task(...)\` (Claude Code syntax). Translate to Copilot fleet
  * Applies base markdown conversions, prepends Copilot adapter header.
  */
 function convertClaudeCommandToCopilotSkill(content, skillName) {
-  const converted = convertClaudeToCodexMarkdown(content);
+  const converted = convertClaudeToCopilotMarkdown(content);
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   let description = `Run GSD workflow ${skillName}.`;
   if (frontmatter) {
@@ -602,7 +615,7 @@ function convertClaudeCommandToCopilotSkill(content, skillName) {
  * Produces JSON-array tools, user-invocable: false, <copilot_agent_role> block.
  */
 function convertClaudeAgentToCopilotAgent(content) {
-  let converted = convertClaudeToCodexMarkdown(content);
+  let converted = convertClaudeToCopilotMarkdown(content);
   const { frontmatter, body } = extractFrontmatterAndBody(converted);
   if (!frontmatter) return converted;
   const name = extractFrontmatterField(frontmatter, 'name') || 'unknown';
@@ -2393,7 +2406,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   let command = '/gsd:new-project';
   if (runtime === 'opencode') command = '/gsd-new-project';
   if (runtime === 'codex') command = '$gsd-new-project';
-  if (runtime === 'copilot') command = '$gsd-new-project';
+  if (runtime === 'copilot') command = '/gsd-new-project';
   console.log(`
   ${green}Done!${reset} Open a blank directory in ${program} and run ${cyan}${command}${reset}.
 

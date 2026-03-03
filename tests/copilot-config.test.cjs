@@ -37,7 +37,7 @@ describe('getCopilotSkillAdapterHeader', () => {
 
   test('includes correct invocation syntax', () => {
     const result = getCopilotSkillAdapterHeader('gsd-plan-phase');
-    assert.ok(result.includes('`$gsd-plan-phase`'), 'has $skillName invocation');
+    assert.ok(result.includes('`/gsd-plan-phase`'), 'has /skillName invocation');
     assert.ok(result.includes('{{GSD_ARGS}}'), 'has GSD_ARGS variable');
   });
 
@@ -111,7 +111,7 @@ description: Test
 Use /gsd:execute-phase to run.`;
 
     const result = convertClaudeCommandToCopilotSkill(input, 'gsd-test');
-    assert.ok(result.includes('$gsd-execute-phase'), 'converts slash commands');
+    assert.ok(result.includes('/gsd-execute-phase'), 'converts slash commands');
     assert.ok(!result.includes('/gsd:execute-phase'), 'original slash command removed');
   });
 
@@ -197,7 +197,7 @@ tools: Read
 Run /gsd:execute-phase to proceed.`;
 
     const result = convertClaudeAgentToCopilotAgent(input);
-    assert.ok(result.includes('$gsd-execute-phase'), 'converts slash commands');
+    assert.ok(result.includes('/gsd-execute-phase'), 'converts slash commands');
     assert.ok(!result.includes('/gsd:execute-phase'), 'original slash command removed');
   });
 
