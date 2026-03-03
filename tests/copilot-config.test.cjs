@@ -20,6 +20,7 @@ const {
   convertClaudeAgentToCopilotAgent,
   installCopilotHooks,
   stripGsdFromCopilotHooks,
+  install,
 } = require('../bin/install.js');
 
 // ─── getCopilotSkillAdapterHeader ───────────────────────────────────────────────
@@ -349,5 +350,91 @@ describe('stripGsdFromCopilotHooks', () => {
     assert.ok(!result.hooks.sessionStart, 'sessionStart removed (was GSD-only)');
     assert.ok(result.hooks.postToolUse, 'postToolUse preserved (has non-GSD entry)');
     assert.strictEqual(result.hooks.postToolUse.length, 1, 'one postToolUse entry remains');
+  });
+});
+
+// ─── Integration: install (copilot) ─────────────────────────────────────────────
+
+describe('install copilot (integration)', () => {
+  let tmpTarget;
+  const commandsSrc = path.join(__dirname, '..', 'commands', 'gsd');
+  const agentsSrc = path.join(__dirname, '..', 'agents');
+
+  beforeEach(() => {
+    tmpTarget = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-copilot-install-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpTarget, { recursive: true, force: true });
+  });
+
+  const hasCommands = fs.existsSync(commandsSrc);
+  const hasAgents = fs.existsSync(agentsSrc);
+
+  (hasCommands ? test : test.skip)('writes skills as skills/gsd-*/SKILL.md with copilot adapter header', () => {
+    // Override config dir so install() writes to tmpTarget
+    process.env.GH_COPILOT_CONFIG_DIR = tmpTarget;
+    try {
+      install(true, 'copilot');
+    } finally {
+      delete process.env.GH_COPILOT_CONFIG_DIR;
+    }
+
+    const skillsDir = path.join(tmpTarget, 'skills');
+    assert.ok(fs.existsSync(skillsDir), 'skills/ directory created');
+
+    const skillDirs = fs.readdirSync(skillsDir, { withFileTypes: true })
+      .filter(e => e.isDirectory() && e.name.startsWith('gsd-'));
+    assert.ok(skillDirs.length > 0, `at least one gsd-* skill dir exists (got ${skillDirs.length})`);
+
+    // Check one skill file for copilot adapter header
+    const firstSkillDir = path.join(skillsDir, skillDirs[0].name);
+    const skillFile = path.join(firstSkillDir, 'SKILL.md');
+    assert.ok(fs.existsSync(skillFile), `SKILL.md exists in ${skillDirs[0].name}/`);
+    const content = fs.readFileSync(skillFile, 'utf8');
+    assert.ok(content.includes('<copilot_skill_adapter>'), 'SKILL.md contains copilot_skill_adapter header');
+  });
+
+  (hasAgents ? test : test.skip)('writes agents as agents/gsd-*.agent.md with copilot_agent_role', () => {
+    process.env.GH_COPILOT_CONFIG_DIR = tmpTarget;
+    try {
+      install(true, 'copilot');
+    } finally {
+      delete process.env.GH_COPILOT_CONFIG_DIR;
+    }
+
+    const agentsDir = path.join(tmpTarget, 'agents');
+    assert.ok(fs.existsSync(agentsDir), 'agents/ directory created');
+
+    const agentFiles = fs.readdirSync(agentsDir)
+      .filter(f => f.startsWith('gsd-') && f.endsWith('.agent.md'));
+    assert.ok(agentFiles.length > 0, `at least one gsd-*.agent.md file exists (got ${agentFiles.length})`);
+
+    // Verify none of the original .md (non .agent.md) files were written
+    const plainMdFiles = fs.readdirSync(agentsDir)
+      .filter(f => f.startsWith('gsd-') && f.endsWith('.md') && !f.endsWith('.agent.md'));
+    assert.strictEqual(plainMdFiles.length, 0, 'no plain gsd-*.md files (only .agent.md)');
+
+    // Check one agent file for copilot_agent_role block
+    const firstAgent = path.join(agentsDir, agentFiles[0]);
+    const content = fs.readFileSync(firstAgent, 'utf8');
+    assert.ok(content.includes('<copilot_agent_role>'), 'agent file contains copilot_agent_role block');
+    assert.ok(content.includes('user-invocable: false'), 'agent frontmatter has user-invocable: false');
+  });
+
+  (hasCommands ? test : test.skip)('creates hooks.json during install', () => {
+    process.env.GH_COPILOT_CONFIG_DIR = tmpTarget;
+    try {
+      install(true, 'copilot');
+    } finally {
+      delete process.env.GH_COPILOT_CONFIG_DIR;
+    }
+
+    const hooksPath = path.join(tmpTarget, 'hooks.json');
+    assert.ok(fs.existsSync(hooksPath), 'hooks.json created');
+    const data = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    assert.strictEqual(data.version, 1, 'hooks.json has version: 1');
+    assert.ok(Array.isArray(data.hooks.sessionStart), 'has sessionStart array');
+    assert.ok(Array.isArray(data.hooks.postToolUse), 'has postToolUse array');
   });
 });

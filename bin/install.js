@@ -1219,7 +1219,11 @@ function copyCommandsAsCodexSkills(srcDir, skillsDir, prefix, pathPrefix, runtim
       content = content.replace(localClaudeRegex, `./${getDirName(runtime)}/`);
       content = content.replace(codexDirRegex, pathPrefix);
       content = processAttribution(content, getCommitAttribution(runtime));
-      content = convertClaudeCommandToCodexSkill(content, skillName);
+      if (runtime === 'copilot') {
+        content = convertClaudeCommandToCopilotSkill(content, skillName);
+      } else {
+        content = convertClaudeCommandToCodexSkill(content, skillName);
+      }
 
       fs.writeFileSync(path.join(skillDir, 'SKILL.md'), content);
     }
@@ -1375,6 +1379,7 @@ function cleanupOrphanedHooks(settings) {
 function uninstall(isGlobal, runtime = 'claude') {
   const isOpencode = runtime === 'opencode';
   const isCodex = runtime === 'codex';
+  const isCopilot = runtime === 'copilot';
   const dirName = getDirName(runtime);
 
   // Get the target directory based on runtime and install type
@@ -1390,6 +1395,7 @@ function uninstall(isGlobal, runtime = 'claude') {
   if (runtime === 'opencode') runtimeLabel = 'OpenCode';
   if (runtime === 'gemini') runtimeLabel = 'Gemini';
   if (runtime === 'codex') runtimeLabel = 'Codex';
+  if (runtime === 'copilot') runtimeLabel = 'Copilot';
 
   console.log(`  Uninstalling GSD from ${cyan}${runtimeLabel}${reset} at ${cyan}${locationLabel}${reset}\n`);
 
@@ -1465,6 +1471,59 @@ function uninstall(isGlobal, runtime = 'claude') {
         fs.writeFileSync(configPath, cleaned);
         removedCount++;
         console.log(`  ${green}✓${reset} Cleaned GSD sections from config.toml`);
+      }
+    }
+  } else if (isCopilot) {
+    // Copilot: remove skills/gsd-*/ skill directories
+    const skillsDir = path.join(targetDir, 'skills');
+    if (fs.existsSync(skillsDir)) {
+      let skillCount = 0;
+      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory() && entry.name.startsWith('gsd-')) {
+          fs.rmSync(path.join(skillsDir, entry.name), { recursive: true });
+          skillCount++;
+        }
+      }
+      if (skillCount > 0) {
+        removedCount++;
+        console.log(`  ${green}✓${reset} Removed ${skillCount} Copilot skills`);
+      }
+    }
+
+    // Copilot: remove GSD agent .agent.md files
+    const copilotAgentsDir = path.join(targetDir, 'agents');
+    if (fs.existsSync(copilotAgentsDir)) {
+      let agentCount = 0;
+      for (const file of fs.readdirSync(copilotAgentsDir)) {
+        if (file.startsWith('gsd-') && file.endsWith('.agent.md')) {
+          fs.unlinkSync(path.join(copilotAgentsDir, file));
+          agentCount++;
+        }
+      }
+      if (agentCount > 0) {
+        removedCount++;
+        console.log(`  ${green}✓${reset} Removed ${agentCount} agent .agent.md files`);
+      }
+    }
+
+    // Copilot: strip GSD entries from hooks.json
+    const copilotHooksPath = path.join(targetDir, 'hooks.json');
+    if (fs.existsSync(copilotHooksPath)) {
+      try {
+        const hooksData = JSON.parse(fs.readFileSync(copilotHooksPath, 'utf8'));
+        const cleaned = stripGsdFromCopilotHooks(hooksData);
+        if (cleaned === null) {
+          fs.unlinkSync(copilotHooksPath);
+          removedCount++;
+          console.log(`  ${green}✓${reset} Removed hooks.json (was GSD-only)`);
+        } else if (JSON.stringify(cleaned) !== JSON.stringify(hooksData)) {
+          fs.writeFileSync(copilotHooksPath, JSON.stringify(cleaned, null, 2) + '\n');
+          removedCount++;
+          console.log(`  ${green}✓${reset} Cleaned GSD hooks from hooks.json`);
+        }
+      } catch (e) {
+        // Ignore JSON parse errors
       }
     }
   } else {
@@ -1994,6 +2053,7 @@ function install(isGlobal, runtime = 'claude') {
   const isOpencode = runtime === 'opencode';
   const isGemini = runtime === 'gemini';
   const isCodex = runtime === 'codex';
+  const isCopilot = runtime === 'copilot';
   const dirName = getDirName(runtime);
   const src = path.join(__dirname, '..');
 
@@ -2017,6 +2077,7 @@ function install(isGlobal, runtime = 'claude') {
   if (isOpencode) runtimeLabel = 'OpenCode';
   if (isGemini) runtimeLabel = 'Gemini';
   if (isCodex) runtimeLabel = 'Codex';
+  if (isCopilot) runtimeLabel = 'Copilot';
 
   console.log(`  Installing for ${cyan}${runtimeLabel}${reset} to ${cyan}${locationLabel}${reset}\n`);
 
@@ -2045,6 +2106,16 @@ function install(isGlobal, runtime = 'claude') {
       failures.push('command/gsd-*');
     }
   } else if (isCodex) {
+    const skillsDir = path.join(targetDir, 'skills');
+    const gsdSrc = path.join(src, 'commands', 'gsd');
+    copyCommandsAsCodexSkills(gsdSrc, skillsDir, 'gsd', pathPrefix, runtime);
+    const installedSkillNames = listCodexSkillNames(skillsDir);
+    if (installedSkillNames.length > 0) {
+      console.log(`  ${green}✓${reset} Installed ${installedSkillNames.length} skills to skills/`);
+    } else {
+      failures.push('skills/gsd-*');
+    }
+  } else if (isCopilot) {
     const skillsDir = path.join(targetDir, 'skills');
     const gsdSrc = path.join(src, 'commands', 'gsd');
     copyCommandsAsCodexSkills(gsdSrc, skillsDir, 'gsd', pathPrefix, runtime);
@@ -2110,6 +2181,11 @@ function install(isGlobal, runtime = 'claude') {
           content = convertClaudeToGeminiAgent(content);
         } else if (isCodex) {
           content = convertClaudeAgentToCodexAgent(content);
+        } else if (isCopilot) {
+          content = convertClaudeAgentToCopilotAgent(content);
+          const agentMdName = entry.name.replace(/\.md$/, '.agent.md');
+          fs.writeFileSync(path.join(agentsDest, agentMdName), content);
+          continue;
         }
         fs.writeFileSync(path.join(agentsDest, entry.name), content);
       }
@@ -2142,7 +2218,7 @@ function install(isGlobal, runtime = 'claude') {
     failures.push('VERSION');
   }
 
-  if (!isCodex) {
+  if (!isCodex && !isCopilot) {
     // Write package.json to force CommonJS mode for GSD scripts
     // Prevents "require is not defined" errors when project has "type": "module"
     // Node.js walks up looking for package.json - this stops inheritance from project
@@ -2197,6 +2273,13 @@ function install(isGlobal, runtime = 'claude') {
     const agentCount = installCodexConfig(targetDir, agentsSrc);
     console.log(`  ${green}✓${reset} Generated config.toml with ${agentCount} agent roles`);
     console.log(`  ${green}✓${reset} Generated ${agentCount} agent .toml config files`);
+    return { settingsPath: null, settings: null, statuslineCommand: null, runtime };
+  }
+
+  if (isCopilot) {
+    // Copilot: register hooks via hooks.json (no settings.json)
+    installCopilotHooks(targetDir, isGlobal);
+    console.log(`  ${green}✓${reset} Configured hooks.json`);
     return { settingsPath: null, settings: null, statuslineCommand: null, runtime };
   }
 
@@ -2281,8 +2364,9 @@ function install(isGlobal, runtime = 'claude') {
 function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallStatusline, runtime = 'claude', isGlobal = true) {
   const isOpencode = runtime === 'opencode';
   const isCodex = runtime === 'codex';
+  const isCopilot = runtime === 'copilot';
 
-  if (shouldInstallStatusline && !isOpencode && !isCodex) {
+  if (shouldInstallStatusline && !isOpencode && !isCodex && !isCopilot) {
     settings.statusLine = {
       type: 'command',
       command: statuslineCommand
@@ -2291,7 +2375,7 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   }
 
   // Write settings when runtime supports settings.json
-  if (!isCodex) {
+  if (!isCodex && !isCopilot) {
     writeSettings(settingsPath, settings);
   }
 
@@ -2304,10 +2388,12 @@ function finishInstall(settingsPath, settings, statuslineCommand, shouldInstallS
   if (runtime === 'opencode') program = 'OpenCode';
   if (runtime === 'gemini') program = 'Gemini';
   if (runtime === 'codex') program = 'Codex';
+  if (runtime === 'copilot') program = 'Copilot';
 
   let command = '/gsd:new-project';
   if (runtime === 'opencode') command = '/gsd-new-project';
   if (runtime === 'codex') command = '$gsd-new-project';
+  if (runtime === 'copilot') command = '$gsd-new-project';
   console.log(`
   ${green}Done!${reset} Open a blank directory in ${program} and run ${cyan}${command}${reset}.
 
@@ -2494,7 +2580,7 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
 }
 
 // Test-only exports — skip main logic when loaded as a module for testing
- if (process.env.GSD_TEST_MODE) {
+if (process.env.GSD_TEST_MODE) {
   module.exports = {
     getCodexSkillAdapterHeader,
     convertClaudeAgentToCodexAgent,
@@ -2511,6 +2597,7 @@ function installAllRuntimes(runtimes, isGlobal, isInteractive) {
     convertClaudeAgentToCopilotAgent,
     installCopilotHooks,
     stripGsdFromCopilotHooks,
+    install,
   };
 } else {
 
