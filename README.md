@@ -86,10 +86,12 @@ The installer prompts you to choose:
 Verify with:
 - Claude Code / Gemini: `/gsd:help`
 - OpenCode: `/gsd-help`
+- Copilot: `/gsd-help`
 - Codex: `$gsd-help`
 
 > [!NOTE]
-> Codex installation uses skills (`skills/gsd-*/SKILL.md`) rather than custom prompts.
+> Codex installation uses skills (`skills/gsd-*/SKILL.md`) rather than custom prompts, invoked with `$skill-name`.
+> Copilot installation also uses skills (`skills/gsd-*/SKILL.md`), invoked with `/skill-name` like other runtimes.
 
 ### Staying Updated
 
@@ -113,16 +115,20 @@ npx get-shit-done-cc --opencode --global # Install to ~/.config/opencode/
 # Gemini CLI
 npx get-shit-done-cc --gemini --global   # Install to ~/.gemini/
 
-# Codex (skills-first)
+# Codex (skills-first, $skill-name invocation)
 npx get-shit-done-cc --codex --global    # Install to ~/.codex/
 npx get-shit-done-cc --codex --local     # Install to ./.codex/
+
+# Copilot (skills-first, /skill-name invocation)
+npx get-shit-done-cc --copilot --global  # Install to ~/.copilot/
+npx get-shit-done-cc --copilot --local   # Install to ./.copilot/
 
 # All runtimes
 npx get-shit-done-cc --all --global      # Install to all directories
 ```
 
 Use `--global` (`-g`) or `--local` (`-l`) to skip the location prompt.
-Use `--claude`, `--opencode`, `--gemini`, `--codex`, or `--all` to skip the runtime prompt.
+Use `--claude`, `--opencode`, `--gemini`, `--codex`, `--copilot`, or `--all` to skip the runtime prompt.
 
 </details>
 
