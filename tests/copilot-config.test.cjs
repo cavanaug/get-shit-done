@@ -18,6 +18,8 @@ const {
   getCopilotSkillAdapterHeader,
   convertClaudeCommandToCopilotSkill,
   convertClaudeAgentToCopilotAgent,
+  installCopilotHooks,
+  stripGsdFromCopilotHooks,
 } = require('../bin/install.js');
 
 // ─── getCopilotSkillAdapterHeader ───────────────────────────────────────────────
@@ -202,5 +204,150 @@ Run /gsd:execute-phase to proceed.`;
     const input = 'Just some content without frontmatter.';
     const result = convertClaudeAgentToCopilotAgent(input);
     assert.strictEqual(result, input, 'returns input unchanged');
+  });
+});
+
+// ─── installCopilotHooks ─────────────────────────────────────────────────────────
+
+describe('installCopilotHooks', () => {
+  let tmpDir;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-copilot-hooks-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('creates hooks.json with correct structure', () => {
+    installCopilotHooks(tmpDir, false);
+    const hooksPath = path.join(tmpDir, 'hooks.json');
+    assert.ok(fs.existsSync(hooksPath), 'hooks.json created');
+    const data = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    assert.strictEqual(data.version, 1, 'has version: 1');
+    assert.ok(Array.isArray(data.hooks.sessionStart), 'sessionStart is array');
+    assert.strictEqual(data.hooks.sessionStart.length, 1, 'one sessionStart entry');
+    const entry = data.hooks.sessionStart[0];
+    assert.strictEqual(entry.type, 'command', 'entry type is command');
+    assert.strictEqual(entry.timeoutSec, 30, 'timeoutSec is 30');
+    assert.ok(entry.bash.includes('gsd-check-update.js'), 'bash contains gsd-check-update.js');
+    assert.ok(Array.isArray(data.hooks.postToolUse), 'postToolUse is array');
+    assert.strictEqual(data.hooks.postToolUse.length, 1, 'one postToolUse entry');
+    assert.ok(data.hooks.postToolUse[0].bash.includes('gsd-context-monitor.js'), 'postToolUse bash contains gsd-context-monitor.js');
+  });
+
+  test('sets correct local path in bash command', () => {
+    installCopilotHooks(tmpDir, false);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    const bash = data.hooks.sessionStart[0].bash;
+    // Local: uses relative path
+    assert.ok(bash.includes('.copilot/hooks/gsd-check-update.js'), 'local path uses relative .copilot/hooks/');
+    assert.ok(!bash.startsWith('node "/'), 'local path is not absolute quoted path');
+  });
+
+  test('sets correct global path in bash command', () => {
+    installCopilotHooks(tmpDir, true);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    const bash = data.hooks.sessionStart[0].bash;
+    // Global: uses absolute path
+    assert.ok(bash.includes('gsd-check-update.js'), 'bash contains gsd-check-update.js');
+    assert.ok(path.isAbsolute(bash.replace(/^node "/, '').replace(/"$/, '')), 'global path is absolute');
+  });
+
+  test('is idempotent', () => {
+    installCopilotHooks(tmpDir, false);
+    installCopilotHooks(tmpDir, false);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    assert.strictEqual(data.hooks.sessionStart.length, 1, 'no duplicate sessionStart entries');
+    assert.strictEqual(data.hooks.postToolUse.length, 1, 'no duplicate postToolUse entries');
+  });
+
+  test('merges into existing hooks.json', () => {
+    const existing = {
+      version: 1,
+      hooks: {
+        sessionStart: [{ type: 'command', bash: 'node other.js', timeoutSec: 10 }],
+      },
+    };
+    fs.writeFileSync(path.join(tmpDir, 'hooks.json'), JSON.stringify(existing, null, 2));
+    installCopilotHooks(tmpDir, false);
+    const data = JSON.parse(fs.readFileSync(path.join(tmpDir, 'hooks.json'), 'utf8'));
+    assert.strictEqual(data.hooks.sessionStart.length, 2, 'now 2 sessionStart entries');
+    assert.ok(data.hooks.sessionStart.some(e => e.bash === 'node other.js'), 'non-GSD entry preserved');
+    assert.ok(data.hooks.sessionStart.some(e => e.bash.includes('gsd-check-update')), 'GSD entry added');
+  });
+});
+
+// ─── stripGsdFromCopilotHooks ────────────────────────────────────────────────────
+
+describe('stripGsdFromCopilotHooks', () => {
+  test('removes GSD sessionStart entry', () => {
+    const input = {
+      version: 1,
+      hooks: {
+        sessionStart: [{ type: 'command', bash: 'node "/home/user/.copilot/hooks/gsd-check-update.js"', timeoutSec: 30 }],
+      },
+    };
+    const result = stripGsdFromCopilotHooks(input);
+    assert.strictEqual(result, null, 'returns null when hooks empty after strip');
+  });
+
+  test('removes GSD postToolUse entry', () => {
+    const input = {
+      version: 1,
+      hooks: {
+        postToolUse: [{ type: 'command', bash: 'node ".copilot/hooks/gsd-context-monitor.js"', timeoutSec: 30 }],
+      },
+    };
+    const result = stripGsdFromCopilotHooks(input);
+    assert.strictEqual(result, null, 'returns null when hooks empty after strip');
+  });
+
+  test('preserves non-GSD entries', () => {
+    const input = {
+      version: 1,
+      hooks: {
+        sessionStart: [
+          { type: 'command', bash: 'node ".copilot/hooks/gsd-check-update.js"', timeoutSec: 30 },
+          { type: 'command', bash: 'node "other-tool.js"', timeoutSec: 10 },
+        ],
+      },
+    };
+    const result = stripGsdFromCopilotHooks(input);
+    assert.ok(result !== null, 'returns object (non-GSD entry remains)');
+    assert.strictEqual(result.hooks.sessionStart.length, 1, 'one entry remains');
+    assert.strictEqual(result.hooks.sessionStart[0].bash, 'node "other-tool.js"', 'non-GSD entry preserved');
+  });
+
+  test('returns null when both arrays become empty', () => {
+    const input = {
+      version: 1,
+      hooks: {
+        sessionStart: [{ type: 'command', bash: 'node "/path/gsd-check-update.js"', timeoutSec: 30 }],
+        postToolUse: [{ type: 'command', bash: 'node "/path/gsd-context-monitor.js"', timeoutSec: 30 }],
+      },
+    };
+    const result = stripGsdFromCopilotHooks(input);
+    assert.strictEqual(result, null, 'returns null when all hooks stripped');
+  });
+
+  test('returns object when non-GSD entries remain', () => {
+    const input = {
+      version: 1,
+      hooks: {
+        sessionStart: [
+          { type: 'command', bash: 'node "/path/gsd-check-update.js"', timeoutSec: 30 },
+        ],
+        postToolUse: [
+          { type: 'command', bash: 'node "custom-hook.js"', timeoutSec: 10 },
+        ],
+      },
+    };
+    const result = stripGsdFromCopilotHooks(input);
+    assert.ok(result !== null, 'returns object');
+    assert.ok(!result.hooks.sessionStart, 'sessionStart removed (was GSD-only)');
+    assert.ok(result.hooks.postToolUse, 'postToolUse preserved (has non-GSD entry)');
+    assert.strictEqual(result.hooks.postToolUse.length, 1, 'one postToolUse entry remains');
   });
 });
