@@ -8,20 +8,20 @@
 
 ### Phase 2: model configuration validation and subagent invocation evaluation
 
-**Goal:** Ensure GSD's model profile system (quality/balanced/budget) actually controls which LLM model Copilot CLI subagents use, by injecting `model:` into `.agent.md` frontmatter at install time and adding install-time profile selection.
+**Goal:** Ensure GSD's model profile system (quality/balanced/budget) actually controls which LLM model Copilot CLI subagents use, by injecting `model:` into `.agent.md` frontmatter at install time and enabling post-install profile changes via `gsd-set-profile`.
 
 **Requirements:**
 - MODEL-01: resolveModelForCopilot helper + model field injection into convertClaudeAgentToCopilotAgent
-- MODEL-02: Install-time profile selection (`--profile` flag + interactive `promptProfile`)
-- MODEL-03: Skill adapter Section C update (all invocation patterns, drop model=) + gsd-set-profile warning
+- MODEL-02: Post-install profile update via `gsd-tools copilot-apply-profile` + `set-profile.md` workflow integration (no re-install required)
+- MODEL-03: Skill adapter Section C update (all invocation patterns, drop model=) + gsd-set-profile "applies automatically" note
 
 **Depends on:** Phase 1
 **Plans:** 3 plans
 
 Plans:
 - [ ] 02-01-PLAN.md — TDD: resolveModelForCopilot + model injection into .agent.md frontmatter
-- [ ] 02-02-PLAN.md — Execute: --profile flag, promptProfile interactive flow, config.json write
-- [ ] 02-03-PLAN.md — Execute: getCopilotSkillAdapterHeader Section C rewrite + gsd-set-profile warning
+- [ ] 02-02-PLAN.md — Execute: copilot-apply-profile command in gsd-tools + set-profile.md integration
+- [ ] 02-03-PLAN.md — Execute: getCopilotSkillAdapterHeader Section C rewrite + gsd-set-profile note
 
 **Wave structure:**
 - Wave 1: Plan 02-01 (TDD — core model resolution + injection)
